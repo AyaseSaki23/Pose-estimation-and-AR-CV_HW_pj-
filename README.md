@@ -22,39 +22,7 @@
 
 需要说明的是，这里的 Gen6D-like 不是复现深度学习版 Gen6D。它借用了 Detector、Selector、Refiner 的模块化思想，但实际使用的是传统视觉方法：pose-projected ROI、ORB + RANSAC homography、显式 2D-3D correspondence、PnP，以及 Canny + distance transform 的边缘细化。
 
-## 结果证据
-
-物体模型和首帧人工初始化：
-
-<p align="center">
-  <img src="report/report_tex/figures/object_model.png" width="46%" alt="object model" />
-  <img src="report/report_tex/figures/pnp_first_frame.jpg" width="46%" alt="first frame PnP" />
-</p>
-
-基础平移视频里的 AR 跟踪效果：
-
-<p align="center">
-  <img src="report/report_tex/figures/main_tracking_result.png" width="72%" alt="AR tracking result" />
-</p>
-
-Reference 图像和当前帧的 ORB 匹配，用来在光流失败后重新找回角点：
-
-<p align="center">
-  <img src="report/report_tex/figures/reference_matching.png" width="72%" alt="reference matching" />
-</p>
-
-第一版旋转方案不是总有效。左边是 reference 选错时出现的飞框，右边是匹配正确时的结果：
-
-<p align="center">
-  <img src="report/report_tex/figures/rotation_tracking_wrong.png" width="46%" alt="wrong reference" />
-  <img src="report/report_tex/figures/rotation_tracking_right.png" width="46%" alt="right reference" />
-</p>
-
-Gen6D-like 流程在 `input.mp4` 上的最终跟踪效果：
-
-<p align="center">
-  <img src="report/report_tex/figures/gen6d_like_tracking.png" width="76%" alt="Gen6D-like tracking" />
-</p>
+## 结果概览
 
 在 1235 帧输入上统计到的主要结果：
 
@@ -68,12 +36,7 @@ Gen6D-like 流程在 `input.mp4` 上的最终跟踪效果：
 | 平均 2D-3D 对应点数 | 5.49 |
 | 平均 top-view inliers | 1443.05 |
 
-扩展任务把位姿结果放到三维空间里看，完整相机轨迹和最近 120 帧轨迹：
-
-<p align="center">
-  <img src="report/report_tex/figures/extension_3_1_camera_world_model.jpg" width="46%" alt="camera and world model" />
-  <img src="report/report_tex/figures/extension_3_2_last_n_track.png" width="46%" alt="last n frames track" />
-</p>
+扩展任务会把位姿结果放到三维空间里，展示完整相机轨迹和最近 120 帧轨迹。
 
 ## 目录结构
 
@@ -84,7 +47,6 @@ include/cvproject/           头文件
 config/                      相机和物体配置
 scripts/                     辅助脚本
 data/objects/object_01/      物体 mesh、reference 图和标注
-report/report_tex/figures/   报告和 README 使用的证据图
 ```
 
 ## 构建和运行

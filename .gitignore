@@ -44,7 +44,6 @@ data/processed/
 *.out
 *.run.xml
 *.synctex.gz
-report/report_tex/*.pdf
 
 # IDE and local tools
 .vs/
