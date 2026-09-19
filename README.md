@@ -24,6 +24,34 @@
 
 ## 结果概览
 
+下面这些图片来自实际运行结果，用来对应 README 里提到的几个关键阶段。
+
+物体模型和首帧 PnP 初始化：
+
+<p align="center">
+  <img src="assets/readme/object_model.png" width="46%" alt="object model" />
+  <img src="assets/readme/pnp_first_frame.jpg" width="46%" alt="initial PnP result" />
+</p>
+
+平移视频中的基础 AR 跟踪效果：
+
+<p align="center">
+  <img src="assets/readme/main_tracking_result.png" width="76%" alt="AR tracking result" />
+</p>
+
+Reference 图像和当前帧之间的特征匹配，用于光流丢失后的重定位：
+
+<p align="center">
+  <img src="assets/readme/reference_matching.png" width="76%" alt="reference matching" />
+</p>
+
+Gen6D-like 流程的最终跟踪结果，以及三维轨迹可视化：
+
+<p align="center">
+  <img src="assets/readme/gen6d_like_tracking.png" width="46%" alt="Gen6D-like tracking" />
+  <img src="assets/readme/extension_3_1_camera_world_model.jpg" width="46%" alt="3D camera and world model" />
+</p>
+
 在 1235 帧输入上统计到的主要结果：
 
 | 指标 | 数值 |
