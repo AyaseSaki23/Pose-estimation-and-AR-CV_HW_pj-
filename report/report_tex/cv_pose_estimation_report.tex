@@ -1,0 +1,407 @@
+%!TEX program = xelatex
+% Compile with: xelatex -> xelatex
+\documentclass[lang=cn,11pt,a4paper]{elegantpaper}
+
+\title{Project 1: 6D Object Pose Estimation and Augmented Reality}
+\author{蒋文涛 \and 丁宁}
+\institute{CV Project}
+\date{\today}
+
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage{float}
+\usepackage{graphicx}
+\usepackage{placeins}
+\usepackage{url}
+
+\Urlmuskip=0mu plus 2mu\relax
+\emergencystretch=3em
+
+\graphicspath{{figures/}{../../data/processed/ar/}{../../data/processed/matches/}{../../data/processed/extension/}{../../docs/figures/}}
+
+\newcommand{\figplaceholder}[2][0.72\textwidth]{%
+  \fbox{\begin{minipage}[c][0.20\textheight][c]{#1}
+  \centering 缺少图片：\texttt{\detokenize{#2}}
+  \end{minipage}}%
+}
+
+\newcommand{\maybeincludegraphics}[2][]{%
+  \IfFileExists{#2}{\includegraphics[#1]{#2}}{\figplaceholder{#2}}%
+}
+
+\begin{document}
+\sloppy
+
+\maketitle
+
+
+\section{Task Goal and System Overview}
+
+本项目要求从视频中估计一个已知三维物体相对于相机的位姿，并在图像中叠加虚拟三维包围盒和坐标轴以实现Augmented Reality效果。目标物体是一个长方体包装盒，其真实尺寸记录在 \texttt{config/object\_01.yml} 中，宽、高、深分别约为 $85\,\mathrm{mm}$、$113\,\mathrm{mm}$、$63\,\mathrm{mm}$。
+
+根据任务要求，系统需要完成相机标定、读取 3D textured object model and object mesh、在当前帧中寻找 3D--2D correspondences、根据对应关系估计 camera/object pose、把三维世界投影到相机图像中实现 AR 可视化，以及扩展任务中的三维相机/世界模型可视化和最近 $n$ 帧轨迹可视化。
+
+\section{Step 1: Camera Calibration}
+
+\subsection{Implementation}
+原本项目计划使用 OpenCV 官方 interactive calibration 工具完成标定，但官方工具更偏向直接生成结果文件，不太方便在报告中展示每一步的有效帧数、重投影误差和相机参数。因此本文改为基于 OpenCV 标定接口自行编写标定程序。
+
+相机标定程序位于 \texttt{apps/\allowbreak calibrate\_camera.cpp}。输入视频为 \texttt{data/\allowbreak calibration/\allowbreak calib\_video.mp4}，输出结果保存到 \texttt{config/\allowbreak camera\_calib.yml}。程序从棋盘格视频中抽取若干帧，检测棋盘格内角点，并使用 \texttt{cornerSubPix} 对角点进行亚像素优化。随后调用 OpenCV 的 \texttt{calibrateCamera} 求解相机内参矩阵和畸变参数。
+
+\subsection{Result}
+
+当前标定图像分辨率为 $1280 \times 720$，有效标定帧数为 29，RMS 重投影误差约为 $0.1964$ 像素。相机内参矩阵近似为：
+\[
+K =
+\begin{bmatrix}
+1187.069 & 0 & 612.575 \\
+0 & 1187.069 & 391.830 \\
+0 & 0 & 1
+\end{bmatrix}.
+\]
+畸变系数近似为：
+\[
+\mathbf{d} = [0,\ -0.05526,\ 0,\ 0,\ 0].
+\]
+根据畸变参数不难发现该相机仅存在轻微桶形畸变，因此去畸变图像与原图差距并不直观。
+\begin{figure}[H]
+\centering
+\maybeincludegraphics[width=0.70\textwidth]{figures/calibration_summary.png}
+\caption{相机标定结果与内参统计}
+\label{fig:calibration-summary}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\maybeincludegraphics[width=0.95\textwidth]{figures/undistort_compare.jpg}
+\caption{标定参数用于图像去畸变的效果对比}
+\label{fig:undistort}
+\end{figure}
+
+\section{Step 2: Read 3D Object Model and Build Box Corners}
+
+\subsection{Implementation}
+
+物体近似长方体且由于用Luma AI 重建获取mesh数据等待时间较长，这里就直接blender建了一个长方体模型，尺寸与 \texttt{config/object\_01.yml} 中记录的真实尺寸一致，这里也给出Luma AI三维重建后可视化结果。
+目标物体近似为长方体。程序从 \texttt{data/objects/object\_01/mesh/box.obj} 读取物体 mesh，并根据 \texttt{config/object\_01.yml} 中记录的真实尺寸推断模型缩放比例，得到以毫米为单位的三维包围盒。包围盒八个角点随后作为 PnP 的三维模型点。
+
+\begin{figure}[H]
+\centering
+\maybeincludegraphics[width=0.95\textwidth]{figures/luma_reconstruction.png}
+\caption{Luma AI 三维重建结果示例}
+\label{fig:luma-reconstruction}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\maybeincludegraphics[width=0.95\textwidth]{figures/object_model.png}
+\caption{长方体三维模型与尺寸}
+\label{fig:object-model}
+\end{figure}
+
+\subsection{Corner Definition}
+
+项目统一使用 1 到 8 的角点编号。各面的角点定义如下：
+\[
+\text{front} = \{1,2,5,6\}, \quad
+\text{right} = \{2,3,6,7\},
+\]
+\[
+\text{left} = \{1,4,5,8\}, \quad
+\text{top} = \{5,6,7,8\}.
+\]
+该编号体系被人工标注、参考图标注、PnP 和旋转鲁棒流程共同使用，避免不同模块之间出现角点语义不一致。
+
+\section{Step 3: Build Initial 3D--2D Correspondences}
+
+\subsection{Implementation}
+
+第一帧的 3D--2D 对应点通过手动标注获得。主程序优先读取 \texttt{data/processed/matches/manual\_keypoints\_frame000.yml}；每个二维图像点都与对应编号的三维角点组成一组 3D--2D correspondence。
+
+\begin{figure}[H]
+\centering
+\maybeincludegraphics[width=0.80\textwidth]{figures/manual_first_frame_annotation.jpg}
+\caption{第一帧人工角点标注示例}
+\label{fig:manual-annotation}
+\end{figure}
+
+\subsection{Problem Encountered and Solution}
+
+PnP 至少需要四组3D点和2D点对应关系，但程序刚开始运行时没有初始位姿，也无法直接判断物体在图像中的位置。如果没有初始对应点，PnP 和后续跟踪流程都无法进行。
+
+因此项目采用首帧人工标注作为初始化方式。点击可见角点后，程序保存这些点与三维角点编号之间的对应关系。人工参与为自动跟踪提供一个可靠的初始 pose。
+
+\section{Step 4: Estimate Initial Pose and Explain PnP Logic}
+
+\subsection{Implementation}
+
+这里将项目涉及到的PnP算法不同情况下逻辑与实现做一个统一的说明，后续涉及PnP相关一笔带过。
+
+获得三维--二维对应点后，程序使用 PnP 方法估计物体相对于相机的位姿。PnP 的输入是一组三维物体点 $\mathbf{X}_i=(X_i,Y_i,Z_i)$、它们在图像中的二维观测点 $\mathbf{x}_i=(u_i,v_i)$、相机内参矩阵 $K$ 和畸变系数。它要求解的是物体坐标系到相机坐标系之间的旋转 $R$ 和平移 $t$，也就是本文后续反复使用的 \texttt{rvec} 和 \texttt{tvec}。
+
+投影模型为：
+\[
+s_i
+\begin{bmatrix}
+u_i \\ v_i \\ 1
+\end{bmatrix}
+=
+K
+\left[
+R \mid t
+\right]
+\begin{bmatrix}
+X_i \\ Y_i \\ Z_i \\ 1
+\end{bmatrix}.
+\]
+其中 $s_i$ 为深度尺度，$K$ 为相机内参，$R$ 和 $t$ 分别表示旋转和平移。换句话说，PnP 的目标就是找到一个位姿，使三维角点经过相机投影后尽可能落在人工标注、光流跟踪或 reference 转移得到的二维角点位置上。
+
+项目将 PnP 的主要逻辑封装在 \texttt{src/pose\_utils.cpp} 的 \texttt{solvePosePnP} 中。该函数首先检查输入点数量是否至少为 4，并要求三维点和二维点数量一致。随后根据点数选择 OpenCV 的 PnP 求解方式：当对应点数量不少于 6 个时，使用 \texttt{SOLVEPNP\_ITERATIVE}；当只有 4 或 5 个点时，使用 \texttt{SOLVEPNP\_EPNP}，点数较多时迭代法可以利用更多约束得到更稳定的结果，而点数较少时 EPNP 更适合作为快速初值求解方式。
+
+PnP 求解完成后，如果开启 refine，程序继续调用 \texttt{solvePnPRefineLM}，使用 LM 优化在当前位姿附近最小化重投影误差。随后项目通过MRE计算平均重投影误差，公式如下：
+\[
+e = \frac{1}{n}\sum_i \left\|\mathbf{x}_i - \pi(K,R,t,\mathbf{X}_i)\right\|_2.
+\]
+这个误差既用于判断初始位姿是否合理，也用于后续跟踪、重定位和 Gen6D流程中的质量评估。最后，程序调用 \texttt{projectPoints} 将三维包围盒和坐标轴投影回图像，实现 AR 可视化。
+
+因此，本文后续提到 PnP 时，均复用上述逻辑：先由当前模块产生 2D--3D 对应关系，再调用 OpenCV PnP 求解 \texttt{rvec}/\texttt{tvec}，再用重投影误差检查位姿质量。
+
+\begin{figure}[H]
+\centering
+\maybeincludegraphics[width=0.80\textwidth]{figures/pnp_first_frame.jpg}
+\caption{第一帧 PnP 位姿估计与 AR 投影结果}
+\label{fig:pnp-first-frame}
+\end{figure}
+
+\subsection{Problem Encountered and Solution}
+
+PnP 对输入点质量非常敏感。如果角点数量太少、角点编号错误或二维点点击位置不准，求出的姿态会出现明显偏差，投影到图像中的三维包围盒也会偏离真实物体。
+
+项目通过三个方式控制该问题。第一，尽量使用多个可见角点进行求解，而不是只依赖最少四个点。第二，在求解后使用 LM refine 进一步优化位姿。第三，始终计算平均重投影误差作为质量指标。如果 AR 包围盒能与真实盒子边缘基本对齐，且重投影误差较小，则认为初始化成功。
+
+\section{Step 5: Track Pose in Translation Video}
+
+\subsection{Implementation}
+
+基础主流程不在每一帧重新人工标注，而是通过自动跟踪维持连续位姿估计。程序观察到正面部分角点在平移视频中较稳定，因此使用 Lucas--Kanade 金字塔光流跟踪这些角点，并通过前向--反向一致性检查过滤漂移点。当前帧获得足够角点后，复用 Step 4 中的 PnP 逻辑更新位姿并绘制 AR 结果。
+
+这一部分的实现思路参考了 LearnOpenCV 的 head pose estimation 示例，ref中给出链接。该示例使用人脸二维关键点、预定义三维人脸模型点、相机内参和 OpenCV \texttt{solvePnP} 来估计头部相对于相机的姿态。本文与其几何思想是一致的：先获得稳定的二维观测点，再与已知三维模型点建立对应关系，最后通过 PnP 求解相机/物体位姿。
+
+\begin{figure}[H]
+\centering
+\maybeincludegraphics[width=0.88\textwidth]{figures/main_tracking_result.png}
+\caption{基础主流程在平移视频中的 AR 跟踪效果}
+\label{fig:main-result}
+\end{figure}
+
+\subsection{Problem Encountered and Solution}
+
+如果每一帧都重新进行全图特征匹配，计算成本较高，而且容易受到背景特征干扰。另一方面，即使 PnP 每帧都成功，位姿也可能出现小幅抖动，导致 AR 包围盒不够平滑。
+
+因此基础流程使用 LK 光流作为主要跟踪方式，只跟踪相对稳定的正面角点，从而减少每帧重新匹配的成本。为了降低位姿抖动，主流程还使用了GTSAM库以对连续帧位姿进行平滑优化。该策略在平移视频中效果较好，但它也暴露出一个重要限制：当物体明显旋转、正面角点离开可见区域时，光流跟踪会自然失效。
+
+\subsection{GTSAM Smoothing Visualization}
+
+为了方便在pdf中更直观地展示 GTSAM 对位姿抖动的抑制效果，本文在旋转视频中选取相隔10帧的处理图片，对比加入 GTSAM 平滑前后的 AR 包围盒投影。
+
+下面四张图分别保留为加入 GTSAM 前后各两帧的 AR 投影对比。明显可感知到 GTSAM 对位姿抖动的抑制效果。
+
+\begin{figure}[H]
+\centering
+\maybeincludegraphics[width=0.82\textwidth]{figures/gtsam_before_frame_1.png}
+\caption{未加入 GTSAM 平滑时第 1 个示例帧的 AR 包围盒投影}
+\label{fig:gtsam-before-frame-1}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\maybeincludegraphics[width=0.82\textwidth]{figures/gtsam_before_frame_2.png}
+\caption{未加入 GTSAM 平滑时第 2 个示例帧的 AR 包围盒投影}
+\label{fig:gtsam-before-frame-2}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\maybeincludegraphics[width=0.82\textwidth]{figures/gtsam_after_frame_1.png}
+\caption{加入 GTSAM 平滑后第 1 个示例帧的 AR 包围盒投影}
+\label{fig:gtsam-after-frame-1}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\maybeincludegraphics[width=0.82\textwidth]{figures/gtsam_after_frame_2.png}
+\caption{加入 GTSAM 平滑后第 2 个示例帧的 AR 包围盒投影}
+\label{fig:gtsam-after-frame-2}
+\end{figure}
+
+\section{Step 6: Reference Relocalization}
+
+\subsection{Implementation}
+
+为了支持光流失败后的恢复，项目建立了 reference image database。参考图保存在 \texttt{data/objects/object\_01/reference} 中，角点标注文件为 \texttt{reference\_keypoints.yml}。当当前帧与某张参考图匹配成功时，程序通过 ORB 特征、ratio test 和 RANSAC homography 将参考图上的角点转移到当前帧，再将这些转移点作为 Step 4 中 PnP 的输入。
+
+这一部分参考了 LearnOpenCV 的 feature based image alignment 教程。该博客介绍了如何在两张图像之间检测 ORB 特征、匹配描述子、筛选较好的匹配点，并使用 RANSAC 估计 homography，从而把一张图像对齐到另一张图像。借用其中的核心思路：把 reference 图像和当前视频帧看作同一物体平面的两个观测，通过 ORB matching 和 RANSAC homography 建立平面映射，再利用该映射把 reference 中人工标注的角点转移到当前帧。转移后的角点随后作为 2D--3D 对应关系输入 PnP 位姿求解。
+
+\begin{figure}[H]
+\centering
+\maybeincludegraphics[width=0.95\textwidth]{figures/reference_matching.png}
+\caption{参考图与当前帧之间的 ORB 特征匹配}
+\label{fig:reference-matching}
+\end{figure}
+
+\subsection{Problem Encountered and Solution}
+
+光流跟踪依赖上一帧的局部点位置。如果出现遮挡、快速运动或角点离开可见区域，光流可能漂移或丢失。一旦跟踪失败，系统需要一种方式重新找到物体。
+
+参考图重定位提供了恢复机制。ORB 匹配用于找到 reference 与当前帧之间的局部特征对应，RANSAC homography 用于过滤错误匹配并估计平面变换。随后将 reference 上的标注角点转移到当前帧，重新构造 3D--2D 对应关系，并交给统一的 PnP 模块求位姿。这个模块解决了短时跟踪丢失后的恢复问题，但仍然主要面向视角变化不大的情况。
+
+\section{Step 7: Rotation-Robust Pose Estimation}
+
+基础流程在平移视频中稳定，但当物体转向 right、left 或 top 面时，原本依赖正面角点的跟踪方式会失效。第一次的尝试是基于Step6进行多面的扩展，效果并不好，具体实践如下。
+
+\subsection{First Attempt}
+
+第一版旋转程序为 \texttt{pose\_estimation\_rotation}。它使用多张 reference 图，分别对应 front、right、left 和 top 面。
+
+\begin{figure}[H]
+\centering
+\maybeincludegraphics[width=0.88\textwidth]{figures/rotation_tracking_wrong.png}
+\caption{第一版旋转方案中 reference 匹配错误导致的飞框}
+\label{fig:rotation-wrong}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\maybeincludegraphics[width=0.88\textwidth]{figures/rotation_tracking_right.png}
+\caption{第一版旋转方案中 reference 匹配正确时的结果}
+\label{fig:rotation-right}
+\end{figure}
+
+\subsection{Problem Encountered and Solution Shift}
+
+第一版旋转方案在实验中遇到几个问题。首先，低纹理侧面缺少稳定 ORB 特征，导致匹配数量不足。其次，reference 选错时，homography 仍然可能得到一些 inliers，但转移后的角点会落在错误位置。第三，单面四点 PnP 约束较弱，只要一个角点转移错误，位姿就可能剧烈跳变，出现飞框。
+
+这些问题说明，仿照平动思路扩展多面实现旋转位姿匹配并不现实也不高效。项目因此转向更接近 Gen6D 的模块化思路：先定位目标区域，再检索最接近的参考视角，然后显式构造 2D--3D 对应关系，最后进行 PnP 和边缘对齐细化。当然此项目并非复现深度学习版 Gen6D，而只是参考其思路实现无模型训练算法，本身并不具备Gen6D类似神经网络。
+
+
+\section{Step 8: Gen6D-like Pipeline}
+
+第一版旋转方案主要依赖 ORB + homography + 单面 PnP。该方法在 reference 选择正确、物体表面纹理明显时可以工作，但在低纹理侧面、视角切换和遮挡情况下容易出现误匹配或飞框。为了解决这个问题，本文参考 Gen6D pose estimator 的整体架构，将旋转鲁棒位姿估计重新组织为 Detector、Selector 和 Refiner 三个阶段。
+
+\begin{figure}[H]
+\centering
+\maybeincludegraphics[width=0.95\textwidth]{figures/gen6d_architecture.png}
+\caption{Gen6D pose estimator 架构示意图}
+\label{fig:gen6d-architecture}
+\end{figure}
+
+如图 \ref{fig:gen6d-architecture} 所示，Gen6D 首先由 detector 在 query image 中定位目标物体；随后 selector 从 reference images 中选择最相似视角；最后 refiner 根据初始位姿进一步优化投影结果。本文没有直接复现 Gen6D 中的深度学习 detector、learned viewpoint descriptor 和神经网络 refiner，但保留了 Gen6D 的模块处理思想，具体如下表:
+
+\begin{table}[H]
+\centering
+\caption{Gen6D 架构与本文 Gen6D-like 实现的对应关系}
+\label{tab:gen6d-module-mapping}
+\begin{tabular}{p{0.18\textwidth}p{0.31\textwidth}p{0.39\textwidth}}
+\toprule
+Gen6D 模块 & Gen6D 中的作用 & 本项目中的对应实现 \\
+\midrule
+Detector & 在 query image 中检测目标区域，为后续视角选择提供局部输入 & 第一帧使用 full-frame fallback；获得有效 pose 后，将三维包围盒投影到图像中，形成 pose-projected ROI，用于限制下一帧搜索范围 \\
+Selector & 从多张 reference images 中选择与当前视角最接近的参考图 & 在 ROI 内提取 ORB 特征，与多张 reference 图匹配；通过 RANSAC homography 做几何验证，并根据匹配数、inliers 和 inlier ratio 选择 top view \\
+Initial Pose & 根据选中的参考视角建立当前帧与三维模型之间的几何联系 & 利用 cached homography 将 reference 标注角点转移到当前帧，形成显式 2D--3D correspondence，并复用 Step 4 的 PnP 逻辑求初始位姿 \\
+Refiner & 将粗略初始位姿进一步细化为更准确的最终位姿 & 使用轻量级 render-and-compare refinement：根据 Canny 边缘和 distance transform，在 PnP 初始位姿附近搜索更贴合图像边缘的姿态 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+这种类比结构解决了旧版旋转 baseline 中的几个关键问题。首先，ROI 避免每帧都在全图范围内进行 reference 匹配，减少背景特征干扰。其次不再固定使用某一个物体面，而是根据当前图像从多张 reference 中选择更接近的视角。最后，Refiner 将图像边缘作为额外几何约束，缓解 homography 角点转移存在小偏差时 PnP 投影不够贴合的问题。
+
+Gen6D-like 流程在 \texttt{input.mp4} 上测试，输出视频保存为 \texttt{output\_gen6d\_like.mp4}，位姿统计保存为 \texttt{poses\_gen6d\_like.csv}，二者均位于 \texttt{data/processed/gen6d\_like/} 目录下。表 \ref{tab:gen6d-like-results} 给出了该流程的主要统计结果。
+
+\begin{table}[H]
+\centering
+\caption{Gen6D-like 在 \texttt{input.mp4} 上的统计结果}
+\label{tab:gen6d-like-results}
+\begin{tabular}{lr}
+\toprule
+指标 & 数值 \\
+\midrule
+处理帧数 & 1235 \\
+有效 PnP 位姿 & 1235 / 1235 \\
+使用 pose-projected ROI 的帧数 & 1234 / 1235 \\
+平均重投影误差 & 2.33 px \\
+最大重投影误差 & 7.13 px \\
+平均 2D--3D 对应点数 & 5.49 \\
+平均 top-view inliers & 1443.05 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\maybeincludegraphics[width=0.88\textwidth]{figures/gen6d_like_tracking.png}
+\caption{Gen6D-like 流程的最终跟踪效果示例}
+\label{fig:gen6d-like-result}
+\end{figure}
+
+\section{Step 9: Extension Task: 3D Visualization}
+
+扩展任务这里在blender里进行可视化，蓝色为完整轨迹，绿色为box,黄色为最近120 frame的轨迹，红色相机视锥为最后一帧。
+\subsection{Visualize the Camera and World Model in 3D}
+
+扩展程序 \texttt{visualize\_extension\_3d} 读取位姿 CSV，根据每一帧的 \texttt{rvec}/\texttt{tvec} 计算相机中心，并在三维视图中绘制物体坐标系、相机视锥和相机轨迹。该部分对应任务要求中的 3.1。
+
+\begin{figure}[H]
+\centering
+\maybeincludegraphics[width=0.90\textwidth]{figures/extension_3_1_camera_world_model.jpg}
+\caption{相机轨迹与世界模型的三维可视化}
+\label{fig:extension-3d-world}
+\end{figure}
+
+\subsection{Visualize the 3D Track over the Last n Frame}
+
+同一扩展程序还生成最近 $n$ 帧的三维轨迹视图，用于观察短时间内相机运动是否平滑、位姿是否存在跳变。该部分对应任务要求中的 3.2。
+
+\begin{figure}[H]
+\centering
+\maybeincludegraphics[width=0.90\textwidth]{figures/extension_3_2_last_n_track.png}
+\caption{最近 $n$ 帧三维轨迹可视化}
+\label{fig:extension-last-n}
+\end{figure}
+
+\section{Results and Discussion}
+
+基础主流程完成了相机标定、三维模型读取、首帧人工初始化、PnP、光流跟踪、参考图重定位、GTSAM 平滑和 AR 可视化，在平移视频中表现稳定。随后，项目把旋转鲁棒性作为主目标继续推进。第一版旋转 baseline 说明 ORB + homography + 单面 PnP 在低纹理侧面和错误 reference 下容易失败；Gen6D-like 流程则通过 ROI、显式 2D--3D correspondence、matching cache、PnP 和边缘细化，提高了旋转场景中的稳定性。
+
+当前主要局限是实时性，但关于实时性，Gen6D原生算法的实时性也并不好，Gen6D Paper中指出，NVIDIA 2080Ti GPU加速下处理单帧 540 x 960的RGB图像avg time为0.64s，本身就是offline算法。对本项目算法，虽然 pose-projected ROI 和 matching cache 已经减少计算量，但 Gen6D-like 流程每帧仍包含 ORB 匹配、RANSAC、PnP、Canny、distance transform 和局部姿态搜索，因此也只能完成offline任务。
+
+
+\section{成员分工}
+
+\noindent 蒋文涛：负责旋转鲁棒改进与扩展可视化，包括 reference 图像匹配、ORB + RANSAC homography 重定位、旋转 baseline、Gen6D-like 改进流程以及三维相机轨迹和最近 $n$ 帧轨迹可视化。
+
+\medskip
+\noindent 丁宁：负责基础位姿估计与 AR 主流程，包括相机标定、3D 角点定义、首帧人工初始化、PnP 位姿求解、LK 光流跟踪、GTSAM 平滑以及 AR 包围盒和坐标轴绘制。
+
+
+\section{References}
+
+本文主要参考了以下文档、论文和开源项目和模板，其中包含项目使用核心算法的官方文档，重点参考为论文和开源项目，模板为overleaf的报告模板：
+\begin{itemize}
+  \item OpenCV Camera Calibration and 3D Reconstruction: \url{https://docs.opencv.org/4.x/d6/d55/tutorial_table_of_content_calib3d.html}
+  \item OpenCV ORB documentation: \url{https://docs.opencv.org/3.4/db/d95/classcv_1_1ORB.html}
+  \item OpenCV solvePnP documentation: \url{https://docs.opencv.org/4.x/d5/d1f/calib3d_solvePnP.html}
+  \item OpenCV optical flow tutorial: \url{https://docs.opencv.org/4.x/d4/dee/tutorial_optical_flow.html}
+  \item LearnOpenCV Head Pose Estimation using OpenCV and Dlib: \url{https://learnopencv.com/head-pose-estimation-using-opencv-and-dlib/}
+  \item LearnOpenCV Feature Based Image Alignment using OpenCV: \url{https://learnopencv.com/image-alignment-feature-based-using-opencv-c-python/}
+  \item GTSAM open-source project: \url{https://github.com/borglab/gtsam}
+  \item GTSAM website: \url{https://gtsam.org/about/}
+  \item Gen6D paper: \url{https://arxiv.org/abs/2204.10776}
+  \item Gen6D project page: \url{https://liuyuan-pal.github.io/Gen6D/}
+  \item Gen6D open-source code: \url{https://github.com/liuyuan-pal/Gen6D}
+  \item OpenCV findHomography documentation: \url{https://docs.opencv.org/4.x/d9/d0c/group__calib3d.html}
+  \item OpenCV Canny Edge Detector tutorial: \url{https://docs.opencv.org/4.x/da/d22/tutorial_py_canny.html}
+  \item OpenCV Distance Transform documentation: \url{https://docs.opencv.org/4.x/d7/d1b/group__imgproc__misc.html}
+  \item Blender Python API documentation: \url{https://docs.blender.org/api/current/}
+\end{itemize}
+
+\end{document}

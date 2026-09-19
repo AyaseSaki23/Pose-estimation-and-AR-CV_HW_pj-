@@ -1,0 +1,10 @@
+%YAML:1.0
+---
+object_name: "box"
+mesh_path: "data/objects/object_01/mesh/box.obj"
+material_path: "data/objects/object_01/mesh/box.mtl"
+reference_dir: "data/objects/object_01/reference"
+width_mm: 85.0
+height_mm: 113.0
+depth_mm: 63.0
+unit: "mm"

@@ -1,0 +1,19 @@
+%YAML:1.0
+---
+calibration_date: "Wed May 13 13:40:17 2026"
+image_width: 1280
+image_height: 720
+valid_frame_count: 29
+reprojection_error: 0.19641799465649948
+camera_matrix: !!opencv-matrix
+   rows: 3
+   cols: 3
+   dt: d
+   data: [ 1187.0690747226656, 0., 612.57457635110939,
+           0., 1187.0690747226656, 391.82980331214515,
+           0., 0., 1. ]
+dist_coeffs: !!opencv-matrix
+   rows: 1
+   cols: 5
+   dt: d
+   data: [ 0., -0.055260424262345773, 0., 0., 0. ]

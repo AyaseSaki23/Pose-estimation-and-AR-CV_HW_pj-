@@ -1,0 +1,59 @@
+# Build output
+build/
+build*/
+out/
+CMakeFiles/
+*.dir/
+*.obj
+*.pdb
+*.ilk
+*.exp
+*.exe
+*.dll
+*.lib
+
+# Vendored GTSAM source
+gtsam/
+
+# Runtime data and generated results
+data/calibration/
+data/raw/
+data/processed/
+
+# Video files
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.webm
+*.m4v
+*.flv
+*.wmv
+*.mpg
+*.mpeg
+*.ts
+*.m2ts
+*.3gp
+
+# LaTeX output
+*.aux
+*.bbl
+*.bcf
+*.blg
+*.log
+*.out
+*.run.xml
+*.synctex.gz
+report/report_tex/*.pdf
+
+# IDE and local tools
+.vs/
+.vscode/
+.idea/
+.codex/
+.agents/
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini

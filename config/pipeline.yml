@@ -1,0 +1,9 @@
+%YAML:1.0
+---
+input_video: "data/raw/videos/input.mp4"
+output_dir: "data/processed"
+camera_config: "config/camera_calib.yml"
+object_config: "config/object_01.yml"
+first_pnp_result: "data/processed/ar/pnp_first_frame.jpg"
+frame_step: 1
+save_debug_frames: 1

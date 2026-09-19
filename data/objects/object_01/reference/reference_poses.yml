@@ -1,0 +1,60 @@
+%YAML:1.0
+---
+references:
+   -
+      image: "ref_oblique_01.jpg"
+      valid: 1
+      rvec: !!opencv-matrix
+         rows: 3
+         cols: 1
+         dt: d
+         data: [ 1.8350241511527441, 0.85215674280453457,
+             -0.66201519077415727 ]
+      tvec: !!opencv-matrix
+         rows: 3
+         cols: 1
+         dt: d
+         data: [ 63.519385327455851, 0.37311712177181594,
+             374.29057708970282 ]
+      reproj_error_px: 2.6920843994614558
+      view_dir_x: 0.63720266777747936
+      view_dir_y: -0.66539148114416724
+      view_dir_z: 0.38887907760386714
+   -
+      image: "ref_oblique_02.jpg"
+      valid: 1
+      rvec: !!opencv-matrix
+         rows: 3
+         cols: 1
+         dt: d
+         data: [ 1.8271507002857681, 0.83640065523020057,
+             -0.64912612142031545 ]
+      tvec: !!opencv-matrix
+         rows: 3
+         cols: 1
+         dt: d
+         data: [ 6.1222258197966202, 5.446412112958205,
+             373.58036137637981 ]
+      reproj_error_px: 2.1201319136631618
+      view_dir_x: 0.72839690996984219
+      view_dir_y: -0.56591116204995295
+      view_dir_z: 0.38624150244847821
+   -
+      image: "ref_oblique_04.jpg"
+      valid: 1
+      rvec: !!opencv-matrix
+         rows: 3
+         cols: 1
+         dt: d
+         data: [ 1.8397355613057618, 0.8335983980095808,
+             -0.6472415270686912 ]
+      tvec: !!opencv-matrix
+         rows: 3
+         cols: 1
+         dt: d
+         data: [ 42.093610807537758, 1.7690820364224338,
+             373.41073792916598 ]
+      reproj_error_px: 1.7012295656942813
+      view_dir_x: 0.66247831227183418
+      view_dir_y: -0.63920208475246487
+      view_dir_z: 0.39056776699769374
